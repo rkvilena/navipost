@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "plasmo dev",
     "build": "plasmo build",
-    "package": "plasmo package"
+    "package": "plasmo package",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "plasmo": "0.90.5",
@@ -20,12 +21,23 @@
     "@types/node": "20.11.5",
     "@types/react": "18.2.48",
     "@types/react-dom": "18.2.18",
-    "prettier": "3.2.4",
+    "tailwindcss": "3.4.1",
+    "postcss": "8.4.35",
+    "autoprefixer": "10.4.17",
     "typescript": "5.3.3"
   },
   "manifest": {
+    "permissions": [
+      "sidePanel",
+      "storage",
+      "tabs"
+    ],
+    "side_panel": {
+      "default_path": "sidepanel.html"
+    },
     "host_permissions": [
-      "https://*/*"
+      "https://x.com/*",
+      "https://twitter.com/*"
     ]
   }
 }
