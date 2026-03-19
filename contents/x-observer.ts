@@ -62,6 +62,47 @@ const scrapeTweetFromTarget = (target: HTMLElement): Tweet | null => {
   }
 }
 
+const extractHandleFromText = (text?: string | null) => {
+  if (!text) {
+    return null
+  }
+  const match = text.match(/@([A-Za-z0-9_]{1,15})/)
+  return match?.[1] ?? null
+}
+
+const getHandleFromProfileLink = () => {
+  const link = document.querySelector<HTMLAnchorElement>(
+    'a[data-testid="AppTabBar_Profile_Link"]'
+  )
+  if (!link?.href) {
+    return null
+  }
+  try {
+    const url = new URL(link.href)
+    const segment = url.pathname.split("/").filter(Boolean)[0]
+    return segment ? segment.replace(/^@/, "") : null
+  } catch (error) {
+    return null
+  }
+}
+
+const getCurrentAccountHandle = () => {
+  const switcher = document.querySelector('[data-testid="SideNav_AccountSwitcher_Button"]')
+  const fromSwitcher = extractHandleFromText(switcher?.textContent)
+  if (fromSwitcher) {
+    return fromSwitcher
+  }
+  return getHandleFromProfileLink()
+}
+
+const notifyObserverReady = async (ready: boolean, handle?: string | null) => {
+  const message: NavipostMessage = {
+    type: "OBSERVER_READY",
+    payload: { ready, handle: handle ?? undefined }
+  }
+  await sendRuntimeMessage(message)
+}
+
 const handleDocumentClick = async (event: MouseEvent) => {
   const target = event.target as HTMLElement | null
   if (!target) {
@@ -99,3 +140,15 @@ const handleDocumentClick = async (event: MouseEvent) => {
 }
 
 document.addEventListener("click", handleDocumentClick, { capture: true })
+let lastHandle = getCurrentAccountHandle()
+notifyObserverReady(true, lastHandle)
+setInterval(() => {
+  const currentHandle = getCurrentAccountHandle()
+  if (currentHandle && currentHandle !== lastHandle) {
+    lastHandle = currentHandle
+    notifyObserverReady(true, currentHandle)
+  }
+}, 3000)
+window.addEventListener("pagehide", () => {
+  notifyObserverReady(false)
+})

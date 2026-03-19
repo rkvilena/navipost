@@ -10,19 +10,17 @@ const Icon = ({ name, className, size = 16 }: IconProps) => {
   const paths = ICON_PATHS[name]
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <svg
-        aria-hidden="true"
-        className={className}
-        fill="currentColor"
-        height={size}
-        viewBox="0 0 24 24"
-        width={size}>
-        {paths.map((path) => (
-          <path d={path.d} key={path.d} />
-        ))}
-      </svg>
-    </div>
+    <svg
+      aria-hidden="true"
+      className={className ? `${className} block` : "block"}
+      fill="currentColor"
+      height={size}
+      viewBox="0 0 24 24"
+      width={size}>
+      {paths.map((path) => (
+        <path d={path.d} key={path.d} />
+      ))}
+    </svg>
   )
 }
 

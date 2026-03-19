@@ -8,7 +8,15 @@ import {
   UNSORTED_FOLDER_NAME
 } from "~/types/navipost"
 
-const STORAGE_KEY = "navipost"
+const BASE_STORAGE_KEY = "navipost"
+
+export const buildStorageKey = (handle?: string) => {
+  if (!handle) {
+    return BASE_STORAGE_KEY
+  }
+  const normalized = handle.startsWith("@") ? handle.slice(1) : handle
+  return `${BASE_STORAGE_KEY}::${normalized}`
+}
 
 const cloneDefaultStorage = (): NavipostStorage =>
   JSON.parse(JSON.stringify(DEFAULT_STORAGE))
@@ -82,26 +90,33 @@ const generateFolderId = () => {
   return `folder-${Date.now()}-${Math.floor(Math.random() * 100000)}`
 }
 
-export const getStorage = async (): Promise<NavipostStorage> => {
-  const result = await chrome.storage.local.get(STORAGE_KEY)
-  return buildStorage(result[STORAGE_KEY])
+export const getStorage = async (
+  storageKey: string = BASE_STORAGE_KEY
+): Promise<NavipostStorage> => {
+  const result = await chrome.storage.local.get(storageKey)
+  return buildStorage(result[storageKey])
 }
 
-export const setStorage = async (storage: NavipostStorage): Promise<NavipostStorage> => {
+export const setStorage = async (
+  storage: NavipostStorage,
+  storageKey: string = BASE_STORAGE_KEY
+): Promise<NavipostStorage> => {
   const normalized = buildStorage(storage)
-  await chrome.storage.local.set({ [STORAGE_KEY]: normalized })
+  await chrome.storage.local.set({ [storageKey]: normalized })
   return normalized
 }
 
-export const initializeStorage = async (): Promise<NavipostStorage> => {
-  const current = await chrome.storage.local.get(STORAGE_KEY)
-  const initialized = buildStorage(current[STORAGE_KEY])
-  await chrome.storage.local.set({ [STORAGE_KEY]: initialized })
+export const initializeStorage = async (
+  storageKey: string = BASE_STORAGE_KEY
+): Promise<NavipostStorage> => {
+  const current = await chrome.storage.local.get(storageKey)
+  const initialized = buildStorage(current[storageKey])
+  await chrome.storage.local.set({ [storageKey]: initialized })
   return initialized
 }
 
-export const addOrUpdateTweetInUnsorted = async (tweet: Tweet) => {
-  const storage = await getStorage()
+export const addOrUpdateTweetInUnsorted = async (tweet: Tweet, storageKey?: string) => {
+  const storage = await getStorage(storageKey)
   const folders = storage.folders.map((folder) => ({
     ...folder,
     tweets: folder.tweets.filter((item) => item.id !== tweet.id)
@@ -118,20 +133,24 @@ export const addOrUpdateTweetInUnsorted = async (tweet: Tweet) => {
     unsorted.tweets.unshift(tweet)
   }
 
-  return setStorage({ ...storage, folders })
+  return setStorage({ ...storage, folders }, storageKey)
 }
 
-export const removeTweetEverywhere = async (tweetId: string) => {
-  const storage = await getStorage()
+export const removeTweetEverywhere = async (tweetId: string, storageKey?: string) => {
+  const storage = await getStorage(storageKey)
   const folders = storage.folders.map((folder) => ({
     ...folder,
     tweets: folder.tweets.filter((tweet) => tweet.id !== tweetId)
   }))
-  return setStorage({ ...storage, folders })
+  return setStorage({ ...storage, folders }, storageKey)
 }
 
-export const assignTweetToFolder = async (tweetId: string, folderId: string) => {
-  const storage = await getStorage()
+export const assignTweetToFolder = async (
+  tweetId: string,
+  folderId: string,
+  storageKey?: string
+) => {
+  const storage = await getStorage(storageKey)
   let targetTweet: Tweet | null = null
 
   const cleanedFolders = storage.folders.map((folder) => {
@@ -155,20 +174,20 @@ export const assignTweetToFolder = async (tweetId: string, folderId: string) => 
     if (unsorted) {
       unsorted.tweets.unshift(targetTweet)
     }
-    return setStorage({ ...storage, folders: cleanedFolders })
+    return setStorage({ ...storage, folders: cleanedFolders }, storageKey)
   }
 
   targetFolder.tweets.unshift(targetTweet)
-  return setStorage({ ...storage, folders: cleanedFolders })
+  return setStorage({ ...storage, folders: cleanedFolders }, storageKey)
 }
 
-export const createFolder = async (name: string) => {
+export const createFolder = async (name: string, storageKey?: string) => {
   const trimmed = name.trim()
   if (!trimmed) {
-    return getStorage()
+    return getStorage(storageKey)
   }
 
-  const storage = await getStorage()
+  const storage = await getStorage(storageKey)
   const exists = storage.folders.some(
     (folder) => folder.name.toLowerCase() === trimmed.toLowerCase()
   )
@@ -181,15 +200,15 @@ export const createFolder = async (name: string) => {
     name: trimmed,
     tweets: []
   }
-  return setStorage({ ...storage, folders: [...storage.folders, folder] })
+  return setStorage({ ...storage, folders: [...storage.folders, folder] }, storageKey)
 }
 
-export const deleteFolder = async (folderId: string) => {
+export const deleteFolder = async (folderId: string, storageKey?: string) => {
   if (folderId === UNSORTED_FOLDER_ID) {
-    return getStorage()
+    return getStorage(storageKey)
   }
 
-  const storage = await getStorage()
+  const storage = await getStorage(storageKey)
   const folder = storage.folders.find((item) => item.id === folderId)
   if (!folder) {
     return storage
@@ -197,7 +216,7 @@ export const deleteFolder = async (folderId: string) => {
 
   const remainder = storage.folders.filter((item) => item.id !== folderId)
   if (storage.settings.folderDeleteBehavior === "delete_tweets") {
-    return setStorage({ ...storage, folders: remainder })
+    return setStorage({ ...storage, folders: remainder }, storageKey)
   }
 
   const unsorted = remainder.find((item) => item.id === UNSORTED_FOLDER_ID)
@@ -211,27 +230,27 @@ export const deleteFolder = async (folderId: string) => {
     })
   }
 
-  return setStorage({ ...storage, folders: remainder })
+  return setStorage({ ...storage, folders: remainder }, storageKey)
 }
 
-export const setAutoOpenSidePanel = async (enabled: boolean) => {
-  const storage = await getStorage()
+export const setAutoOpenSidePanel = async (enabled: boolean, storageKey?: string) => {
+  const storage = await getStorage(storageKey)
   return setStorage({
     ...storage,
     settings: {
       ...storage.settings,
       autoOpenSidePanel: enabled
     }
-  })
+  }, storageKey)
 }
 
-export const setThemeMode = async (theme: ThemeMode) => {
-  const storage = await getStorage()
+export const setThemeMode = async (theme: ThemeMode, storageKey?: string) => {
+  const storage = await getStorage(storageKey)
   return setStorage({
     ...storage,
     settings: {
       ...storage.settings,
       theme
     }
-  })
+  }, storageKey)
 }

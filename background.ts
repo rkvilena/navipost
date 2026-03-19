@@ -1,6 +1,7 @@
 import {
   addOrUpdateTweetInUnsorted,
   assignTweetToFolder,
+  buildStorageKey,
   createFolder,
   deleteFolder,
   getStorage,
@@ -11,8 +12,27 @@ import {
 } from "~/lib/storage"
 import type { NavipostMessage } from "~/types/navipost"
 
-const broadcastStorageUpdated = async () => {
-  const storage = await getStorage()
+const observerStateByTab = new Map<number, { ready: boolean; handle?: string }>()
+
+const isXUrl = (url?: string): boolean => {
+  if (!url) {
+    return false
+  }
+
+  try {
+    const parsed = new URL(url)
+    return (
+      parsed.hostname === "x.com" ||
+      parsed.hostname.endsWith(".x.com") ||
+      parsed.hostname === "twitter.com" ||
+      parsed.hostname.endsWith(".twitter.com")
+    )
+  } catch (error) {
+    return false
+  }
+}
+
+const broadcastStorageUpdated = async (storage: Awaited<ReturnType<typeof getStorage>>) => {
   try {
     await chrome.runtime.sendMessage({
       type: "STORAGE_UPDATED",
@@ -23,12 +43,50 @@ const broadcastStorageUpdated = async () => {
   }
 }
 
+const syncSidePanelForTab = async (tabId: number, url?: string) => {
+  const enabled = isXUrl(url)
+  await chrome.sidePanel.setOptions({
+    tabId,
+    enabled,
+    path: enabled ? "sidepanel.html" : undefined
+  })
+  if (!enabled) {
+    observerStateByTab.delete(tabId)
+  }
+}
+
+const syncActiveTabSidePanel = async () => {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+  if (!tab?.id) {
+    return
+  }
+  await syncSidePanelForTab(tab.id, tab.url)
+}
+
+const resolveStorageKey = async (tabId?: number) => {
+  if (typeof tabId === "number") {
+    const handle = observerStateByTab.get(tabId)?.handle
+    if (handle) {
+      return buildStorageKey(handle)
+    }
+  }
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+  const activeHandle = tab?.id ? observerStateByTab.get(tab.id)?.handle : undefined
+  return buildStorageKey(activeHandle)
+}
+
 const openSidePanelIfNeeded = async (tabId?: number) => {
   if (typeof tabId !== "number") {
     tabId = Number(tabId)
   }
 
-  const storage = await getStorage()
+  const tab = await chrome.tabs.get(tabId)
+  if (!isXUrl(tab.url)) {
+    return
+  }
+
+  const storageKey = await resolveStorageKey(tabId)
+  const storage = await getStorage(storageKey)
   if (!storage.settings.autoOpenSidePanel) {
     return
   }
@@ -38,14 +96,20 @@ const openSidePanelIfNeeded = async (tabId?: number) => {
 
 chrome.runtime.onInstalled.addListener(async () => {
   await initializeStorage()
+  await syncActiveTabSidePanel()
+})
+
+chrome.runtime.onStartup.addListener(async () => {
+  await syncActiveTabSidePanel()
 })
 
 chrome.runtime.onMessage.addListener((message: NavipostMessage, sender, sendResponse) => {
   const run = async () => {
     switch (message.type) {
       case "TWEET_BOOKMARKED": {
-        await addOrUpdateTweetInUnsorted(message.payload.tweet)
-        await broadcastStorageUpdated()
+        const storageKey = await resolveStorageKey(sender.tab?.id)
+        const storage = await addOrUpdateTweetInUnsorted(message.payload.tweet, storageKey)
+        await broadcastStorageUpdated(storage)
         try {
           await openSidePanelIfNeeded(sender.tab?.id)
         } catch (error) {
@@ -55,19 +119,26 @@ chrome.runtime.onMessage.addListener((message: NavipostMessage, sender, sendResp
         return
       }
       case "TWEET_UNBOOKMARKED": {
-        await removeTweetEverywhere(message.payload.tweetId)
-        await broadcastStorageUpdated()
+        const storageKey = await resolveStorageKey(sender.tab?.id)
+        const storage = await removeTweetEverywhere(message.payload.tweetId, storageKey)
+        await broadcastStorageUpdated(storage)
         sendResponse({ ok: true })
         return
       }
       case "ASSIGN_TWEET_TO_FOLDER": {
-        await assignTweetToFolder(message.payload.tweetId, message.payload.folderId)
-        await broadcastStorageUpdated()
+        const storageKey = await resolveStorageKey(sender.tab?.id)
+        const storage = await assignTweetToFolder(
+          message.payload.tweetId,
+          message.payload.folderId,
+          storageKey
+        )
+        await broadcastStorageUpdated(storage)
         sendResponse({ ok: true })
         return
       }
       case "CREATE_FOLDER": {
-        const storage = await createFolder(message.payload.name)
+        const storageKey = await resolveStorageKey(sender.tab?.id)
+        const storage = await createFolder(message.payload.name, storageKey)
         try {
           await chrome.runtime.sendMessage({
             type: "STORAGE_UPDATED",
@@ -80,25 +151,57 @@ chrome.runtime.onMessage.addListener((message: NavipostMessage, sender, sendResp
         return
       }
       case "DELETE_FOLDER": {
-        await deleteFolder(message.payload.folderId)
-        await broadcastStorageUpdated()
+        const storageKey = await resolveStorageKey(sender.tab?.id)
+        const storage = await deleteFolder(message.payload.folderId, storageKey)
+        await broadcastStorageUpdated(storage)
         sendResponse({ ok: true })
         return
       }
       case "TOGGLE_AUTO_OPEN_SIDE_PANEL": {
-        await setAutoOpenSidePanel(message.payload.enabled)
-        await broadcastStorageUpdated()
+        const storageKey = await resolveStorageKey(sender.tab?.id)
+        const storage = await setAutoOpenSidePanel(message.payload.enabled, storageKey)
+        await broadcastStorageUpdated(storage)
         sendResponse({ ok: true })
         return
       }
       case "SET_THEME_MODE": {
-        await setThemeMode(message.payload.theme)
-        await broadcastStorageUpdated()
+        const storageKey = await resolveStorageKey(sender.tab?.id)
+        const storage = await setThemeMode(message.payload.theme, storageKey)
+        await broadcastStorageUpdated(storage)
         sendResponse({ ok: true })
         return
       }
+      case "OBSERVER_READY": {
+        const tabId = sender.tab?.id
+        if (typeof tabId === "number") {
+          if (message.payload.ready) {
+            observerStateByTab.set(tabId, {
+              ready: true,
+              handle: message.payload.handle
+            })
+          } else {
+            observerStateByTab.delete(tabId)
+          }
+          sendResponse({ ok: true })
+          return
+        }
+        sendResponse({ ok: false })
+        return
+      }
+      case "GET_OBSERVER_STATUS": {
+        const tabId = message.payload.tabId
+        const tab = await chrome.tabs.get(tabId)
+        sendResponse({
+          ok: true,
+          ready: observerStateByTab.get(tabId)?.ready ?? false,
+          isX: isXUrl(tab.url),
+          handle: observerStateByTab.get(tabId)?.handle
+        })
+        return
+      }
       case "GET_STORAGE": {
-        const storage = await getStorage()
+        const storageKey = await resolveStorageKey(sender.tab?.id)
+        const storage = await getStorage(storageKey)
         sendResponse({ ok: true, storage })
         return
       }
@@ -110,4 +213,27 @@ chrome.runtime.onMessage.addListener((message: NavipostMessage, sender, sendResp
 
   run().catch(() => sendResponse({ ok: false }))
   return true
+})
+
+chrome.tabs.onActivated.addListener(async ({ tabId }) => {
+  const tab = await chrome.tabs.get(tabId)
+  await syncSidePanelForTab(tabId, tab.url)
+})
+
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+  if (changeInfo.url) {
+    await syncSidePanelForTab(tabId, changeInfo.url)
+    return
+  }
+  if (changeInfo.status === "complete") {
+    await syncSidePanelForTab(tabId, tab.url)
+  }
+})
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  observerStateByTab.delete(tabId)
+})
+
+chrome.windows.onFocusChanged.addListener(async () => {
+  await syncActiveTabSidePanel()
 })

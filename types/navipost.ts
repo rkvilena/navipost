@@ -55,6 +55,15 @@ export interface SetThemeModePayload {
   theme: ThemeMode
 }
 
+export interface ObserverReadyPayload {
+  ready: boolean
+  handle?: string
+}
+
+export interface GetObserverStatusPayload {
+  tabId: number
+}
+
 export type NavipostMessage =
   | { type: "TWEET_BOOKMARKED"; payload: BookmarkPayload }
   | { type: "TWEET_UNBOOKMARKED"; payload: UnbookmarkPayload }
@@ -63,6 +72,8 @@ export type NavipostMessage =
   | { type: "DELETE_FOLDER"; payload: DeleteFolderPayload }
   | { type: "TOGGLE_AUTO_OPEN_SIDE_PANEL"; payload: ToggleAutoOpenPayload }
   | { type: "SET_THEME_MODE"; payload: SetThemeModePayload }
+  | { type: "OBSERVER_READY"; payload: ObserverReadyPayload }
+  | { type: "GET_OBSERVER_STATUS"; payload: GetObserverStatusPayload }
   | { type: "GET_STORAGE" }
   | { type: "STORAGE_UPDATED"; payload: NavipostStorage }
 
